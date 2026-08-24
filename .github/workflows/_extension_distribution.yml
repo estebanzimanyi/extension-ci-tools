@@ -367,7 +367,8 @@ jobs:
       - name: Create env file for docker
         run: |
           cat <<-EOF > docker_env.txt
-          VCPKG_BINARY_SOURCES=$VCPKG_BINARY_SOURCES
+          VCPKG_BINARY_SOURCES=$VCPKG_BINARY_SOURCES;files,/vcpkg_cache,readwrite
+          VCPKG_DEFAULT_BINARY_CACHE=/vcpkg_cache
           USE_MERGED_VCPKG_MANIFEST=${{ inputs.use_merged_vcpkg_manifest }}
           AWS_ACCESS_KEY_ID=${{ secrets.VCPKG_CACHING_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY=${{ secrets.VCPKG_CACHING_AWS_SECRET_ACCESS_KEY }}
@@ -388,7 +389,7 @@ jobs:
           EXTENSION_NAME=${{ inputs.extension_name }}
           EXTENSION_CANONICAL=${{ inputs.extension_canonical }}
           LINUX_CI_IN_DOCKER=1
-          CCACHE_MAXSIZE=1G
+          CCACHE_MAXSIZE=5G
           CCACHE_NOCOMPRESS=1
           SUBSET_EXTENSIONS_TESTS=${{ inputs.extensions_test_selection }}
           EOF
@@ -404,6 +405,25 @@ jobs:
       - name: Create Ccache directory
         run: |
           mkdir ccache_dir
+
+      - name: Create vcpkg binary cache directory
+        run: |
+          mkdir -p vcpkg_cache
+
+      # The dependency set a manifest names is the same from one run to the
+      # next, so the archives vcpkg produces for it are reusable: the key is
+      # the vcpkg commit, the triplet and the manifest itself, and any run
+      # whose dependencies are unchanged restores them instead of compiling
+      # them again. The timestamp keeps each save its own entry, exactly as
+      # the ccache entry beside it does.
+      - name: Load vcpkg binary cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ./vcpkg_cache
+          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}-${{ steps.ccache_timestamp.outputs.timestamp }}
+          restore-keys: |
+            vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}
+            vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-
 
       - name: Load Ccache
         uses: actions/cache/restore@v4
@@ -429,7 +449,7 @@ jobs:
           DEPS=$(python3 -c "import json; data=json.loads(r'$JSON'); print(' '.join(data.get('${{ matrix.duckdb_arch }}', [])) if '${{ matrix.duckdb_arch }}' in data else '')" | tr -d '\n')
           if [ ! -z "$DEPS" ]; then
             for dep in $DEPS; do
-              docker run --env-file=docker_env.txt -v `pwd`:/duckdb_build_dir duckdb/${{ matrix.duckdb_arch }} vcpkg install $dep --recurse
+              docker run --env-file=docker_env.txt -v `pwd`:/duckdb_build_dir -v `pwd`/vcpkg_cache:/vcpkg_cache duckdb/${{ matrix.duckdb_arch }} vcpkg install $dep --recurse
             done
           fi
 
@@ -445,11 +465,11 @@ jobs:
       - name: Run configure (inside Docker)
         shell: bash
         run: |
-          docker run --env-file=docker_env.txt -v `pwd`:/duckdb_build_dir -v `pwd`/ccache_dir:/ccache_dir duckdb/${{ matrix.duckdb_arch }} make configure_ci
+          docker run --env-file=docker_env.txt -v `pwd`:/duckdb_build_dir -v `pwd`/vcpkg_cache:/vcpkg_cache -v `pwd`/ccache_dir:/ccache_dir duckdb/${{ matrix.duckdb_arch }} make configure_ci
 
       - name: Build extension (inside Docker)
         run: |
-          docker run --env-file=docker_env.txt -v `pwd`:/duckdb_build_dir -v `pwd`/ccache_dir:/ccache_dir duckdb/${{ matrix.duckdb_arch }} make ${{ inputs.build_type }}
+          docker run --env-file=docker_env.txt -v `pwd`:/duckdb_build_dir -v `pwd`/vcpkg_cache:/vcpkg_cache -v `pwd`/ccache_dir:/ccache_dir duckdb/${{ matrix.duckdb_arch }} make ${{ inputs.build_type }}
 
       - name: Save Ccache
         if: ${{ inputs.save_cache }}
@@ -458,10 +478,17 @@ jobs:
           path: ./ccache_dir
           key: ccache-extension-distribution-${{ matrix.duckdb_arch }}-${{ inputs.duckdb_version }}-${{ steps.ccache_timestamp.outputs.timestamp }}
 
+      - name: Save vcpkg binary cache
+        if: ${{ inputs.save_cache }}
+        uses: actions/cache/save@v4
+        with:
+          path: ./vcpkg_cache
+          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}-${{ steps.ccache_timestamp.outputs.timestamp }}
+
       - name: Test extension (inside docker)
         if: ${{ matrix.duckdb_arch != 'linux_arm64' && inputs.skip_tests == false }}
         run: |
-          docker run --env-file=docker_env.txt -v `pwd`:/duckdb_build_dir -v `pwd`/ccache_dir:/ccache_dir duckdb/${{ matrix.duckdb_arch }} make test_${{ inputs.build_type }}
+          docker run --env-file=docker_env.txt -v `pwd`:/duckdb_build_dir -v `pwd`/vcpkg_cache:/vcpkg_cache -v `pwd`/ccache_dir:/ccache_dir duckdb/${{ matrix.duckdb_arch }} make test_${{ inputs.build_type }}
 
       - name: Test extension (outside docker)
         if: ${{ matrix.duckdb_arch != 'linux_arm64' && inputs.skip_tests == false }}
@@ -522,6 +549,10 @@ jobs:
       VCPKG_OVERLAY_TRIPLETS: ${{ github.workspace }}/extension-ci-tools/toolchains
       USE_MERGED_VCPKG_MANIFEST: ${{ inputs.use_merged_vcpkg_manifest }}
       # VCPKG caching
+      # The dependency set a manifest names is the same from one run to the next,
+      # so the archives vcpkg produces for it are reusable rather than rebuilt.
+      VCPKG_BINARY_SOURCES: ${{ (inputs.vcpkg_binary_sources == '' && 'clear;http,https://vcpkg-cache.duckdb.org,read' || inputs.vcpkg_binary_sources) }};files,${{ github.workspace }}/vcpkg_cache,readwrite
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg_cache
       AWS_ACCESS_KEY_ID: ${{ secrets.VCPKG_CACHING_AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.VCPKG_CACHING_AWS_SECRET_ACCESS_KEY }}
       AWS_ENDPOINT_URL: ${{ secrets.VCPKG_CACHING_AWS_ENDPOINT_URL }}
@@ -561,6 +592,19 @@ jobs:
           key: ccache-extension-distribution-${{ matrix.duckdb_arch }}-${{ inputs.duckdb_version }}
           restore-keys: ccache-extension-distribution-${{ matrix.duckdb_arch }}-
           save: ${{ inputs.save_cache }}
+
+      - name: Create vcpkg binary cache directory
+        run: |
+          mkdir -p ${{ github.workspace }}/vcpkg_cache
+
+      - name: Load vcpkg binary cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}
+            vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-
 
       - uses: actions/setup-python@v5
         with:
@@ -712,6 +756,14 @@ jobs:
         run: |
           EXTENSION_NAME=${{ inputs.extension_name }} EXTENSION_CANONICAL=${{ inputs.extension_canonical }} ENABLE_EXTENSION_AUTOINSTALL=1 ENABLE_EXTENSION_AUTOLOADING=1 make ${{ inputs.build_type }}
 
+
+      - name: Save vcpkg binary cache
+        if: ${{ inputs.save_cache }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}-${{ github.run_id }}
+
       - name: Test Extension
         if: ${{ matrix.osx_build_arch == 'arm64' && inputs.skip_tests == false }}
         env:
@@ -769,6 +821,10 @@ jobs:
       VCPKG_OVERLAY_TRIPLETS: ${{ github.workspace }}/extension-ci-tools/toolchains
       USE_MERGED_VCPKG_MANIFEST: ${{ inputs.use_merged_vcpkg_manifest }}
       # VCPKG caching
+      # The dependency set a manifest names is the same from one run to the next,
+      # so the archives vcpkg produces for it are reusable rather than rebuilt.
+      VCPKG_BINARY_SOURCES: ${{ (inputs.vcpkg_binary_sources == '' && 'clear;http,https://vcpkg-cache.duckdb.org,read' || inputs.vcpkg_binary_sources) }};files,${{ github.workspace }}/vcpkg_cache,readwrite
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg_cache
       AWS_ACCESS_KEY_ID: ${{ secrets.VCPKG_CACHING_AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.VCPKG_CACHING_AWS_SECRET_ACCESS_KEY }}
       AWS_ENDPOINT_URL: ${{ secrets.VCPKG_CACHING_AWS_ENDPOINT_URL }}
@@ -858,6 +914,19 @@ jobs:
           key: ccache-extension-distribution-${{ matrix.duckdb_arch }}-${{ inputs.duckdb_version }}
           restore-keys: ccache-extension-distribution-${{ matrix.duckdb_arch }}-
           save: ${{ inputs.save_cache }}
+
+      - name: Create vcpkg binary cache directory
+        run: |
+          mkdir -p ${{ github.workspace }}/vcpkg_cache
+
+      - name: Load vcpkg binary cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}
+            vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-
 
       - uses: r-lib/actions/setup-r@v2
         if:  matrix.duckdb_arch == 'windows_amd64_rtools' || matrix.duckdb_arch == 'windows_amd64_mingw'
@@ -992,6 +1061,14 @@ jobs:
           )
           make ${{ inputs.build_type }}
 
+
+      - name: Save vcpkg binary cache
+        if: ${{ inputs.save_cache }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}-${{ github.run_id }}
+
       - name: Test extension
         if: ${{ inputs.skip_tests == false }}
         shell: bash
@@ -1058,6 +1135,10 @@ jobs:
       VCPKG_OVERLAY_PORTS: ${{ github.workspace }}/extension-ci-tools/vcpkg_ports
       VCPKG_OVERLAY_TRIPLETS: ${{ github.workspace }}/extension-ci-tools/toolchains
       # VCPKG caching
+      # The dependency set a manifest names is the same from one run to the next,
+      # so the archives vcpkg produces for it are reusable rather than rebuilt.
+      VCPKG_BINARY_SOURCES: ${{ (inputs.vcpkg_binary_sources == '' && 'clear;http,https://vcpkg-cache.duckdb.org,read' || inputs.vcpkg_binary_sources) }};files,${{ github.workspace }}/vcpkg_cache,readwrite
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg_cache
       AWS_ACCESS_KEY_ID: ${{ secrets.VCPKG_CACHING_AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.VCPKG_CACHING_AWS_SECRET_ACCESS_KEY }}
       AWS_ENDPOINT_URL: ${{ secrets.VCPKG_CACHING_AWS_ENDPOINT_URL }}
@@ -1156,6 +1237,19 @@ jobs:
           key: ccache-extension-distribution-${{ matrix.duckdb_arch }}-${{ inputs.duckdb_version }}
           restore-keys: ccache-extension-distribution-${{ matrix.duckdb_arch }}-
           save: ${{ inputs.save_cache }}
+
+      - name: Create vcpkg binary cache directory
+        run: |
+          mkdir -p ${{ github.workspace }}/vcpkg_cache
+
+      - name: Load vcpkg binary cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}
+            vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-
 
       - name: Downgrade AWS cli
         if: ${{ (contains(format(';{0};', inputs.extra_toolchains), ';downgraded_aws_cli;')) }}
