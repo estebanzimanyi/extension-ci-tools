@@ -471,6 +471,12 @@ jobs:
         run: |
           docker run --env-file=docker_env.txt -v `pwd`:/duckdb_build_dir -v `pwd`/vcpkg_cache:/vcpkg_cache -v `pwd`/ccache_dir:/ccache_dir duckdb/${{ matrix.duckdb_arch }} make ${{ inputs.build_type }}
 
+      - name: Report cache statistics
+        if: always()
+        run: |
+          docker run --env-file=docker_env.txt -v `pwd`:/duckdb_build_dir -v `pwd`/vcpkg_cache:/vcpkg_cache -v `pwd`/ccache_dir:/ccache_dir duckdb/${{ matrix.duckdb_arch }} ccache -s || true
+          echo "vcpkg archives held: $(find vcpkg_cache -type f | wc -l) ($(du -sh vcpkg_cache | cut -f1))"
+
       - name: Save Ccache
         if: ${{ inputs.save_cache }}
         uses: actions/cache/save@v4
@@ -589,6 +595,10 @@ jobs:
         uses: hendrikmuhs/ccache-action@main
         continue-on-error: true
         with:
+          # A DuckDB build occupies more than the action's default half a
+          # gigabyte, so a smaller ceiling evicts most of what it stores and
+          # the next run restores an entry holding little of what it compiles.
+          max-size: 5G
           key: ccache-extension-distribution-${{ matrix.duckdb_arch }}-${{ inputs.duckdb_version }}
           restore-keys: ccache-extension-distribution-${{ matrix.duckdb_arch }}-
           save: ${{ inputs.save_cache }}
@@ -911,6 +921,10 @@ jobs:
         uses: hendrikmuhs/ccache-action@main
         continue-on-error: true
         with:
+          # A DuckDB build occupies more than the action's default half a
+          # gigabyte, so a smaller ceiling evicts most of what it stores and
+          # the next run restores an entry holding little of what it compiles.
+          max-size: 5G
           key: ccache-extension-distribution-${{ matrix.duckdb_arch }}-${{ inputs.duckdb_version }}
           restore-keys: ccache-extension-distribution-${{ matrix.duckdb_arch }}-
           save: ${{ inputs.save_cache }}
@@ -1234,6 +1248,10 @@ jobs:
         uses: hendrikmuhs/ccache-action@main
         continue-on-error: true
         with:
+          # A DuckDB build occupies more than the action's default half a
+          # gigabyte, so a smaller ceiling evicts most of what it stores and
+          # the next run restores an entry holding little of what it compiles.
+          max-size: 5G
           key: ccache-extension-distribution-${{ matrix.duckdb_arch }}-${{ inputs.duckdb_version }}
           restore-keys: ccache-extension-distribution-${{ matrix.duckdb_arch }}-
           save: ${{ inputs.save_cache }}
