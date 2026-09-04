@@ -387,8 +387,20 @@ jobs:
           EXTENSION_NAME=${{ inputs.extension_name }}
           EXTENSION_CANONICAL=${{ inputs.extension_canonical }}
           LINUX_CI_IN_DOCKER=1
-          CCACHE_MAXSIZE=5G
-          CCACHE_NOCOMPRESS=1
+          # A cache only pays off if it is still there on the next run. GitHub
+          # evicts least-recently-used once a repository passes 10 GB, so the
+          # ceiling that matters is the whole matrix at once, not one job: about
+          # seven architectures, and twice that when a second DuckDB version is
+          # matrixed beside the first. At 5 GB apiece the budget is spent by the
+          # third architecture, and the small caches lose the eviction race to
+          # the large ones every time.
+          #
+          # 500M compressed keeps one generation of a fourteen-way matrix near
+          # 7 GB, so the entry a job saves survives until that job runs again.
+          # Compression also shrinks what each job uploads and downloads, which
+          # is the part of a cache step that costs wall-clock here.
+          CCACHE_MAXSIZE=500M
+          CCACHE_COMPRESS=1
           SUBSET_EXTENSIONS_TESTS=${{ inputs.extensions_test_selection }}
           EOF
           echo '${{ inputs.test_config }}'| jq -r '.test_env_variables // {} | to_entries | map("\(.key)=\(.value)")|.[]' >> docker_env.txt
@@ -596,7 +608,7 @@ jobs:
           # A DuckDB build occupies more than the action's default half a
           # gigabyte, so a smaller ceiling evicts most of what it stores and
           # the next run restores an entry holding little of what it compiles.
-          max-size: 5G
+          max-size: 500M
           key: ccache-extension-distribution-${{ matrix.duckdb_arch }}-${{ inputs.duckdb_version }}
           restore-keys: ccache-extension-distribution-${{ matrix.duckdb_arch }}-
           save: ${{ inputs.save_cache }}
@@ -913,7 +925,7 @@ jobs:
           # A DuckDB build occupies more than the action's default half a
           # gigabyte, so a smaller ceiling evicts most of what it stores and
           # the next run restores an entry holding little of what it compiles.
-          max-size: 5G
+          max-size: 500M
           key: ccache-extension-distribution-${{ matrix.duckdb_arch }}-${{ inputs.duckdb_version }}
           restore-keys: ccache-extension-distribution-${{ matrix.duckdb_arch }}-
           save: ${{ inputs.save_cache }}
@@ -1229,7 +1241,7 @@ jobs:
           # A DuckDB build occupies more than the action's default half a
           # gigabyte, so a smaller ceiling evicts most of what it stores and
           # the next run restores an entry holding little of what it compiles.
-          max-size: 5G
+          max-size: 500M
           key: ccache-extension-distribution-${{ matrix.duckdb_arch }}-${{ inputs.duckdb_version }}
           restore-keys: ccache-extension-distribution-${{ matrix.duckdb_arch }}-
           save: ${{ inputs.save_cache }}
