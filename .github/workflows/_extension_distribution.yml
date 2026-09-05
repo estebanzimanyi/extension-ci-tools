@@ -1303,6 +1303,13 @@ jobs:
           path: |
             build/${{ matrix.duckdb_arch }}/repository/**/*.duckdb_extension.wasm
 
+      - name: Save vcpkg binary cache
+        if: ${{ inputs.save_cache }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}-${{ github.run_id }}
+
       - name: Print Rust logs
         if: ${{ inputs.rust_logs && (inputs.enable_rust || contains(format(';{0};', inputs.extra_toolchains), ';rust;')) }}
         shell: bash
