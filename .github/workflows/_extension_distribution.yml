@@ -803,6 +803,11 @@ jobs:
   windows:
     name: Windows
     runs-on: ${{ matrix.runner }}
+    # A MinGW build with no cache to restore compiles its vcpkg packages in about
+    # 53 minutes and DuckDB with the extension in about 46, and saves both caches
+    # only once it succeeds, so the job limit stays above that and ends a job that
+    # stops making progress well before the 6-hour default.
+    timeout-minutes: 150
     needs:
       - generate_matrix
       - linux
@@ -1077,6 +1082,8 @@ jobs:
 
       - name: Test extension
         if: ${{ inputs.skip_tests == false }}
+        # The suite runs in under a minute; a test that waits on itself ends here.
+        timeout-minutes: 20
         shell: bash
         env:
           DUCKDB_PLATFORM: ${{ matrix.duckdb_arch }}
