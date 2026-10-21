@@ -722,7 +722,9 @@ jobs:
       - name: Install unixODBC (amd64)
         if: ${{ contains(format(';{0};', inputs.extra_toolchains), ';unixodbc;') && matrix.duckdb_arch == 'osx_amd64' }}
         run: |
-          arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          # Intel Homebrew is deprecated: the installer is pinned to the last commit that installs
+          # it, as duckdb/extension-ci-tools does, for as long as osx_amd64 is built.
+          arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/0f5b7666a65fc2d1a2615549f02771353c250f9a/install.sh)"
           /usr/local/bin/brew config
           /usr/local/bin/brew install unixodbc
           /usr/local/bin/brew ls -v unixodbc
