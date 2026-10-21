@@ -406,13 +406,16 @@ jobs:
       # next, so the archives vcpkg produces for it are reusable: the key is
       # the vcpkg commit, the triplet and the manifest itself, and any run
       # whose dependencies are unchanged restores them instead of compiling
-      # them again. The timestamp keeps each save its own entry, exactly as
-      # the ccache entry beside it does.
+      # them again. The key is that content alone, so a run restoring it
+      # exactly saves nothing, and a changed dependency set is saved once
+      # under its own key: one entry per dependency set, where a key per run
+      # kept a copy of the same archives for every run until eviction.
       - name: Load vcpkg binary cache
+        id: vcpkg_restore
         uses: actions/cache/restore@v6
         with:
           path: ./vcpkg_cache
-          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}-${{ steps.ccache_timestamp.outputs.timestamp }}
+          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}
           restore-keys: |
             vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}
             vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-
@@ -477,11 +480,11 @@ jobs:
           key: ccache-extension-distribution-${{ matrix.duckdb_arch }}-${{ inputs.duckdb_version }}-${{ steps.ccache_timestamp.outputs.timestamp }}
 
       - name: Save vcpkg binary cache
-        if: ${{ inputs.save_cache }}
+        if: ${{ inputs.save_cache && steps.vcpkg_restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: ./vcpkg_cache
-          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}-${{ steps.ccache_timestamp.outputs.timestamp }}
+          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}
 
       - name: Test extension (inside docker)
         if: ${{ matrix.duckdb_arch != 'linux_arm64' && inputs.skip_tests == false }}
@@ -600,10 +603,11 @@ jobs:
           mkdir -p ${{ github.workspace }}/vcpkg_cache
 
       - name: Load vcpkg binary cache
+        id: vcpkg_restore
         uses: actions/cache/restore@v6
         with:
           path: ${{ github.workspace }}/vcpkg_cache
-          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}
           restore-keys: |
             vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}
             vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-
@@ -762,11 +766,11 @@ jobs:
 
 
       - name: Save vcpkg binary cache
-        if: ${{ inputs.save_cache }}
+        if: ${{ inputs.save_cache && steps.vcpkg_restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: ${{ github.workspace }}/vcpkg_cache
-          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}
 
       - name: Test Extension
         if: ${{ matrix.osx_build_arch == 'arm64' && inputs.skip_tests == false }}
@@ -933,10 +937,11 @@ jobs:
           mkdir -p ${{ github.workspace }}/vcpkg_cache
 
       - name: Load vcpkg binary cache
+        id: vcpkg_restore
         uses: actions/cache/restore@v6
         with:
           path: ${{ github.workspace }}/vcpkg_cache
-          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}
           restore-keys: |
             vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}
             vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-
@@ -1080,11 +1085,11 @@ jobs:
 
 
       - name: Save vcpkg binary cache
-        if: ${{ inputs.save_cache }}
+        if: ${{ inputs.save_cache && steps.vcpkg_restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: ${{ github.workspace }}/vcpkg_cache
-          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: vcpkg-extension-distribution-${{ matrix.duckdb_arch }}-${{ matrix.vcpkg_target_triplet }}-${{ inputs.vcpkg_commit }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg_ports/**') }}
 
       - name: Test extension
         if: ${{ inputs.skip_tests == false }}
