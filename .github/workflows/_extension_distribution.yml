@@ -392,7 +392,7 @@ jobs:
         id: ccache_timestamp
         run: |
           string(TIMESTAMP current_date "%Y-%m-%d-%H;%M;%S" UTC)
-          message("::set-output name=timestamp::${current_date}")
+          file(APPEND "$ENV{GITHUB_OUTPUT}" "timestamp=${current_date}\n")
 
       - name: Create Ccache directory
         run: |
