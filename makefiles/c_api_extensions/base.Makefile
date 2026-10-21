@@ -6,7 +6,8 @@
 # 	USE_UNSTABLE_C_API     : if set to 1, will allow usage of the unstable C API. (This pins the produced binaries to the exact DuckDB version)
 #   EXTENSION_VERSION      : the version of the extension, if left blank it will be autodetected
 #   DUCKDB_PLATFORM        : the platform of the extension, if left blank it will be autodetected
-#   DUCKDB_TEST_VERSION    : the version of DuckDB to test with, if left blank will default to latest stable on PyPi
+#   DUCKDB_TEST_VERSION    : the version of DuckDB to test with, if left blank will default to TARGET_DUCKDB_VERSION when
+#                            USE_UNSTABLE_C_API=1 and to latest stable on PyPi otherwise
 #   LINUX_CI_IN_DOCKER     : indicates that the build is being run in/out of Docker in the linux CI
 #   SKIP_TESTS             : makes the test targets turn into NOPs
 
@@ -108,12 +109,15 @@ TEST_RUNNER_BASE=$(TEST_RUNNER) --test-dir test/sql $(EXTRA_EXTENSIONS_PARAM)
 TEST_RUNNER_DEBUG=$(TEST_RUNNER_BASE) --external-extension build/debug/$(EXTENSION_NAME).duckdb_extension
 TEST_RUNNER_RELEASE=$(TEST_RUNNER_BASE) --external-extension build/release/$(EXTENSION_NAME).duckdb_extension
 
-# By default latest duckdb is installed, set DUCKDB_TEST_VERSION to switch to a different version
+# By default latest duckdb is installed, set DUCKDB_TEST_VERSION to switch to a different version. A binary built on the
+# unstable C API only loads in TARGET_DUCKDB_VERSION, so it is tested with that version.
 DUCKDB_PIP_INSTALL?=duckdb
 ifeq ($(DUCKDB_TEST_VERSION),main)
 	DUCKDB_PIP_INSTALL=--pre duckdb
 else ifneq ($(DUCKDB_TEST_VERSION),)
 	DUCKDB_PIP_INSTALL=duckdb==$(DUCKDB_TEST_VERSION)
+else ifeq ($(USE_UNSTABLE_C_API),1)
+	DUCKDB_PIP_INSTALL=duckdb==$(patsubst v%,%,$(TARGET_DUCKDB_VERSION))
 endif
 
 # This allows C API extensions to be tested against a prerelease of DuckDB. This only really makes sense when DuckDB already
