@@ -1,5 +1,9 @@
 FROM quay.io/pypa/manylinux_2_28_x86_64
 
+# Read EPEL from its primary host, whose metadata is the one the metalink checksums;
+# the mirrors the metalink hands out may serve another repomd.xml or fail TLS
+RUN sed -i '/^\[epel\]$/,/^\[/ { s|^metalink=|#metalink=|; s|^#baseurl=https://download.example/pub/epel/|baseurl=https://dl.fedoraproject.org/pub/epel/| }' /etc/yum.repos.d/epel.repo
+
 # Setup the basic necessities
 RUN yum groupinstall -y "Development Tools"
 RUN yum install -y curl zip unzip tar autoconf libtool
